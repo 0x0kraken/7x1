@@ -7,55 +7,71 @@ import {ERC20FlashMint} from "@openzeppelin/contracts@5.1.0/token/ERC20/extensio
 import {Ownable} from "@openzeppelin/contracts@5.1.0/access/Ownable.sol";
 
 contract Nudex is ERC20, ERC20Burnable, Ownable, ERC20FlashMint {
-    uint256 public constant MINT_FEE = 0.00007 ether; // Taxa por mint
-    uint256 public constant TOKENS_PER_MINT = 7 * 10 ** 18; // Tokens por mint (com 18 decimais)
-    uint256 public constant MAX_SUPPLY = 431533233 * 10 ** 18; // Fornecimento total (com 18 decimais)
-    uint256 public constant MAX_SUPPLY_DIARIO = 4315 * 10 ** 18; // Máximo permitido para mint diário
-    uint256 public dailyMintedTokens; // Quantidade de tokens mintados no dia
-    uint256 public lastMintReset; // Marca o último reset diário
+    uint256 public constant MINT_FEE = 0.000071 ether; // Minting fee
+    uint256 public constant TOKENS_PER_MINT = 7 * 10 ** 18; // Tokens per mint (with 18 decimals)
+    uint256 public constant MAX_DAILY_SUPPLY = 4315 * 10 ** 18; // Maximum allowed daily minting
+    uint256 public dailyMintedTokens; // Amount of tokens minted in the current day
+    uint256 public lastMintReset; // Marks the last daily reset timestamp
+    address public feeRecipient; // Address to receive the collected fees
+    uint256 public lockedSupply; // Locked initial supply
+    uint256 public immutable lockReleaseTime; // Timestamp when locked supply can be released
 
-    address public feeRecipient; // Endereço que receberá as taxas
-
-    constructor(address initialOwner, address initialFeeRecipient)
+    constructor(address initialFeeRecipient)
         ERC20("7x1Eternal", "7x1")
-        Ownable()
+        Ownable(msg.sender)
     {
-        uint256 initialSupply = 431533 * 10 ** 18; // Fornecimento inicial
-        _mint(msg.sender, initialSupply);
+        uint256 initialSupply = 431533 * 10 ** 18; // Initial supply
+        uint256 unlockedSupply = 7001 * 10 ** 18; // Unlocked supply
+
+        _mint(msg.sender, unlockedSupply); // Mint only 700 tokens initially
+        lockedSupply = initialSupply - unlockedSupply; // Set the locked supply
         lastMintReset = block.timestamp;
         feeRecipient = initialFeeRecipient;
-        transferOwnership(initialOwner); // Define o proprietário inicial
+        lockReleaseTime = block.timestamp + 701 days; // Set lock period (701 days from deployment)
+        transferOwnership(msg.sender); // Set the initial owner
     }
 
     function mintTokens() public payable {
-        // Reseta o contador diário se um novo dia começar
+        // Reset the daily counter if a new day has started
         if (block.timestamp >= lastMintReset + 1 days) {
             dailyMintedTokens = 0;
             lastMintReset = block.timestamp;
         }
 
-        // Verifica se o fornecimento total e o diário permitem o mint
-        require(totalSupply() + TOKENS_PER_MINT <= MAX_SUPPLY, "Fornecimento total atingido");
-        require(dailyMintedTokens + TOKENS_PER_MINT <= MAX_SUPPLY_DIARIO, "Fornecimento diario atingido");
-        require(msg.value == MINT_FEE, "Saldo insuficiente para mintar");
+        // Verify that the total and daily supply limits allow minting
+        require(dailyMintedTokens + TOKENS_PER_MINT <= MAX_DAILY_SUPPLY, "Daily supply limit reached");
+        require(msg.value == MINT_FEE, "Insufficient fee for minting");
 
-        // Atualiza o contador diário e minta os tokens
+        // Update the daily counter and mint tokens
         dailyMintedTokens += TOKENS_PER_MINT;
         _mint(msg.sender, TOKENS_PER_MINT);
 
-        // Envia a taxa para o destinatário
+        // Transfer the fee to the recipient
         payable(feeRecipient).transfer(msg.value);
     }
 
-    // Função para alterar o destinatário das taxas
+    // Function to update the fee recipient address
     function setFeeRecipient(address newRecipient) public onlyOwner {
-        require(newRecipient != address(0), "Endereço inválido");
+        require(newRecipient != address(0), "Invalid address");
         feeRecipient = newRecipient;
     }
 
-    // Função para alterar o proprietário do contrato
+    // Function to transfer ownership of the contract
     function transferOwnership(address newOwner) public override onlyOwner {
-        require(newOwner != address(0), "Novo proprietário inválido");
+        require(newOwner != address(0), "Invalid new owner");
         super.transferOwnership(newOwner);
+    }
+
+    // Function to release locked supply (only owner can call)
+    function releaseLockedSupply(uint256 amount) public onlyOwner {
+        require(block.timestamp >= lockReleaseTime, "Locked supply cannot be released yet");
+        require(amount <= lockedSupply, "Amount exceeds locked supply");
+        lockedSupply -= amount;
+        _mint(msg.sender, amount);
+    }
+
+    // Function to view the amount of locked supply
+    function viewLockedSupply() public view returns (uint256) {
+        return lockedSupply;
     }
 }
